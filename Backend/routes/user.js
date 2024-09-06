@@ -4,7 +4,7 @@ const jwt = require('jsonwebtoken');
 const { JWT_SECRET } = require('../config');
 const { z } = require('zod');
 const User = require('../models/user');
-const Account = require('../models/account');
+const {Account} = require('../models/account');
 const bcrypt = require('bcrypt');
 
 const signupSchema = z.object({
@@ -16,78 +16,55 @@ const signupSchema = z.object({
 
 router.post('/signup', async (req, res) => {
     try {
-        const body = req.body;
-        const result = signupSchema.safeParse(body);
-        
+      
+        const result = signupSchema.safeParse(req.body);
+
         if (!result.success) {
-            console.log('Validation errors:', result.error.errors);
-            return res.status(400).json({
-                message: "Incorrect inputs",
-                errors: result.error.errors
-            });
+            return res.status(400).json({ message: "Incorrect inputs", errors: result.error.errors });
         }
 
-        const existingUser = await User.findOne({ username: body.username });
-        
+        const { username, password, firstName, lastName } = req.body;
+
+        const existingUser = await User.findOne({ username });
         if (existingUser) {
-            return res.status(400).json({
-                message: "Username already taken"
-            });
+            return res.status(400).json({ message: "Username already taken" });
         }
 
-        const hashedPassword = await bcrypt.hash(body.password, 10);
-        
+        const hashedPassword = await bcrypt.hash(password, 10);
+
         const dbUser = await User.create({
-            username: body.username,
+            username,
             password: hashedPassword,
-            firstName: body.firstName,
-            lastName: body.lastName
+            firstName,
+            lastName
         });
 
-        const token = jwt.sign({
-            userId: dbUser._id
-        }, JWT_SECRET, { expiresIn: '1h' });
-        console.log('Generated JWT token:', token);
-        
-        await Account.create({
-            userId: dbUser._id,
-            balance: 1 + Math.random() * 10000
-        });
+        const token = jwt.sign({ userId: dbUser._id }, JWT_SECRET, { expiresIn: '1h' });
+        console.log("token",token);
 
-        res.json({
-            message: "User created successfully",
-            token: token
-        });
+        await Account.create({ userId: dbUser._id, balance: 1 + Math.random() * 10000 });
+
+        res.json({ message: "User created successfully", token });
     } catch (error) {
         console.error("Signup error:", error);
-        res.status(500).json({
-            message: "Internal server error",
-            error: error.message
-        });
+        res.status(500).json({ message: "Internal server error", error: error.message });
     }
 });
 
 router.get('/bulk', async (req, res) => {
-    const filter = req.query.filter || "";
-    const users = await User.find({
-        $or: [{
-            firstName: {
-                "$regex": filter
-            }
-        }, {
-            lastName: {
-                "$regex": filter
-            }
-        }]
-    });
-    res.json({
-        users: users.map(user => ({
-            username: user.username,
-            firstName: user.firstName,
-            lastName: user.lastName,
-            _id: user._id
-        }))
-    });
+    try {
+        const filter = req.query.filter || "";
+        const users = await User.find({
+            $or: [
+                { firstName: { "$regex": filter, "$options": "i" } },
+                { lastName: { "$regex": filter, "$options": "i" } }
+            ]
+        });
+        res.json({ users });
+    } catch (error) {
+        console.error("Error fetching users:", error);
+        res.status(500).json({ message: "Internal server error" });
+    }
 });
 
 module.exports = router;
